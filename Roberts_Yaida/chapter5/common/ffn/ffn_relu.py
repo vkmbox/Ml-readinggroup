@@ -25,17 +25,15 @@ class ParametricReLUNet(FFNGmetricLogging):
 
         #1st dimension-trainset size, 2nd dimension-layer width
         zk = torch.tensor(xx.transpose(), dtype=torch.float32)
-        if self.g_indices != None:
-            self.log_gmetric(zk)
+        self.trigger_on_forward_step_activ_callbacks(zk.detach().numpy())
 
         for linear in self.hidden_linears:
             zk = linear(zk)
+            self.trigger_on_forward_step_preactiv_callbacks(zk.detach().numpy())
             zk = self.PReLU(zk)
-            if self.g_indices != None:
-                self.log_gmetric(zk)
+            self.trigger_on_forward_step_activ_callbacks(zk.detach().numpy())
 
         zk = self.output_linear(zk)
-        #if self.g_indices != None:
-        #    self.record_gmetric(zk)
+        self.trigger_on_forward_step_preactiv_callbacks(zk.detach().numpy())
 
         return zk.detach().numpy().transpose()
