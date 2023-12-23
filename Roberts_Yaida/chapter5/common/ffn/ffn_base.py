@@ -1,5 +1,8 @@
+import types
 import math
+import torch
 import torch.nn as nn
+import numpy as np
 
 class FeedForwardNet(nn.Module):
 
@@ -46,36 +49,61 @@ class FeedForwardNet(nn.Module):
         self.cb, self.cw = cb, cw
         n_prev = self.n0
         for linear in self.hidden_linears:
-            self.init_linear_weights(linear, self.bias_on, math.sqrt(cb), math.sqrt(cw/n_prev))
+            self.init_linear_weights(linear, self.bias_on, cb, cw/n_prev)
             n_prev = linear.weight.size()[0]
 
-        self.init_linear_weights(self.output_linear, self.bias_on, math.sqrt(cb), math.sqrt(cw/n_prev))
+        self.init_linear_weights(self.output_linear, self.bias_on, cb, cw/n_prev)
 
     @staticmethod
-    def init_linear_weights(linear, bias_on, std_b=1.0, std_w=1.0):
-        nn.init.normal_(linear.weight, mean = 0., std = std_w)
-        n_prev = linear.weight.size()[0]
+    def init_linear_weights(linear, bias_on, var_b=1.0, var_w=1.0):
+        #nn.init.normal_(linear.weight, mean = 0., std = math.sqrt(var_w)) #approach via torch
+        rows, cols, dims = linear.out_features, linear.in_features, linear.out_features * linear.in_features
+        data = np.reshape(np.random.normal(0, math.sqrt(var_w), dims), (rows,cols))
+        #np.reshape(np.random.multivariate_normal([0]*dims, np.identity(dims)*var_w, size=1)[0], (rows,cols))
+        with torch.no_grad():
+            linear.weight.copy_(torch.from_numpy(data).float())
         if bias_on:
-            nn.init.normal_(linear.bias, mean = 0., std = std_b)
+            nn.init.normal_(linear.bias, mean = 0., std = math.sqrt(var_b))
 
-class FFNGmetricLogging(FeedForwardNet):
+class FFNOnForwardLogging(FeedForwardNet):
+    def __init__(self, n0=3, nk=10, nl=3, l=3, bias_on=False):
+        super().__init__(n0, nk, nl, l, bias_on)
+        self.on_forward_step_activ = list() # callbacks for forward_steps_activation
+        self.on_forward_step_preactiv = list() # callbacks for forward_steps_preactivation
+
+    def register_on_forward_step_activ_callback(self, callback: types.FunctionType):
+        self.on_forward_step_activ.append(callback)
+
+    def register_on_forward_step_preactiv_callback(self, callback: types.FunctionType):
+        self.on_forward_step_preactiv.append(callback)
+
+    def trigger_on_forward_step_activ_callbacks(self, zk_):
+        for callback in self.on_forward_step_activ:
+            callback(zk_)
+
+    def trigger_on_forward_step_preactiv_callbacks(self, zk_):
+        for callback in self.on_forward_step_preactiv:
+            callback(zk_)
+
+class FFNGmetricLogging(FFNOnForwardLogging):
     def __init__(self, n0=3, nk=10, nl=3, l=3, bias_on=False):
         super().__init__(n0, nk, nl, l, bias_on)
         self.GXX = None  # record the flow of metric G (of type 4.8 and 4.36)
         self.g_indices = None # trainpoint-indices for the flow to record
+        self.register_on_forward_step_activ_callback(self.log_gmetric)
 
     #g_indices is an array of tuples of size number_of_index_pairs_to_track
     def set_gmetric_recording_indices(self, g_indices):
         self.g_indices = g_indices
 
-    def log_gmetric(self, zk):
-        zk_ = zk.detach().numpy()
-        for key, values in self.GXX.items():
-            if values == None:
-                values = []
-                self.GXX[key] = values
-            (index_one, index_two) = key
-            values.append(self.G_xx(zk_[index_one-1], zk_[index_two-1], self.cb, self.cw))
+    def log_gmetric(self, zk_):
+        if self.g_indices != None:
+            for key, values in self.GXX.items():
+                if values == None:
+                    values = []
+                    self.GXX[key] = values
+                (index_one, index_two) = key
+                values.append(self.G_xx(zk_[index_one-1], zk_[index_two-1], self.cb, self.cw))
 
     def get_gmetric(self, index_one, index_two):
         try:
