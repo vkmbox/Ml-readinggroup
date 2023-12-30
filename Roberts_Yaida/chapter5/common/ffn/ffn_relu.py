@@ -16,6 +16,9 @@ class ParametricReLUNet(FFNGmetricLogging):
         input = torch.where(input >= 0, self.slope_positive * input, self.slope_negative * input)
         return input
 
+    def PReLUz(self, input: float) -> float:
+        return self.slope_positive * input if input >= 0 else self.slope_negative * input
+
     def forward(self, xx):
         if self.slope_positive == None:
             raise Exception("To use forward set slopes with call ParametricReLUNet.set_slopes(...)")
