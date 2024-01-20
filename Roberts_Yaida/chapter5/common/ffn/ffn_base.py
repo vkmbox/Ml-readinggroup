@@ -56,12 +56,13 @@ class FeedForwardNet(nn.Module):
 
     @staticmethod
     def init_linear_weights(linear, bias_on, var_b=1.0, var_w=1.0):
-        #nn.init.normal_(linear.weight, mean = 0., std = math.sqrt(var_w)) #approach via torch
+        nn.init.normal_(linear.weight, mean = 0., std = math.sqrt(var_w)) #approach via torch
+        '''
         rows, cols, dims = linear.out_features, linear.in_features, linear.out_features * linear.in_features
         data = np.reshape(np.random.normal(0, math.sqrt(var_w), dims), (rows,cols))
-        #np.reshape(np.random.multivariate_normal([0]*dims, np.identity(dims)*var_w, size=1)[0], (rows,cols))
         with torch.no_grad():
             linear.weight.copy_(torch.from_numpy(data).float())
+        '''
         if bias_on:
             nn.init.normal_(linear.bias, mean = 0., std = math.sqrt(var_b))
 

@@ -19,6 +19,12 @@ class ParametricReLUNet(FFNGmetricLogging):
     def PReLUz(self, input: float) -> float:
         return self.slope_positive * input if input >= 0 else self.slope_negative * input
 
+    '''
+    def PReLUa(self, input):
+        print(input.shape)
+        return [self.slope_positive * item if item >= 0 else self.slope_negative * item for item in input]
+    '''
+
     def forward(self, xx):
         if self.slope_positive == None:
             raise Exception("To use forward set slopes with call ParametricReLUNet.set_slopes(...)")
