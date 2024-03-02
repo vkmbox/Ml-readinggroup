@@ -90,10 +90,34 @@ class FFNGmetricLogging(FFNOnForwardLogging):
     def __init__(self, n0=3, nk=10, nl=3, l=3, bias_on=False):
         super().__init__(n0, nk, nl, l, bias_on)
         self.GXX = None  # record the flow of metric G (of type 4.8 and 4.36)
-        self.g_indices = None # trainpoint-indices for the flow to record
+        self.g_indices = None # trainpoint-indices for the metric G flow to record
         self.register_on_forward_step_activ_callback(self.log_gmetric)
+        self.PRE = None  # record the flow of preactivation
+        self.pre_indices = None # trainpoint-indices for the preactivation flow to record
+        self.register_on_forward_step_preactiv_callback(self.log_preactivation)        
 
-    #g_indices is an array of tuples of size number_of_index_pairs_to_track
+    #pre_indices is an array of integers
+    def set_preactivation_recording_indices(self, pre_indices):
+        self.pre_indices = pre_indices
+    
+    def log_preactivation(self, zk_):
+        if self.pre_indices != None:
+            for key, values in self.PRE.items():
+                if values == None:
+                    values = []
+                    self.PRE[key] = values
+                #index = key
+                values.append((zk_[key-1]))
+
+    def get_preactivation(self, index):
+        try:
+            return self.PRE[index]
+        except KeyError:
+            if self.get_log_level() in ("debug", "info"):
+                print("practivation for index {} not found".format(index))
+            return []
+
+    #g_indices is an array of tuples
     def set_gmetric_recording_indices(self, g_indices):
         self.g_indices = g_indices
 

@@ -8,6 +8,8 @@ class TanhNet(FFNGmetricLogging):
     def forward(self, xx):
         if self.g_indices != None:
             self.GXX = dict.fromkeys(self.g_indices, None)
+        if self.pre_indices != None:
+            self.PRE = dict.fromkeys(self.pre_indices, None)
 
         #1st dimension-trainset size, 2nd dimension-layer width
         zk = torch.tensor(xx.transpose(), dtype=torch.float32)
