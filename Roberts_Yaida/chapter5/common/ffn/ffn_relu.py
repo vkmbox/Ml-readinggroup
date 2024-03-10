@@ -1,4 +1,5 @@
 import torch
+#import torch.nn.functional as F
 from torch import Tensor
 from .ffn_base import FFNGmetricLogging 
 
@@ -24,8 +25,13 @@ class ParametricReLUNet(FFNGmetricLogging):
         print(input.shape)
         return [self.slope_positive * item if item >= 0 else self.slope_negative * item for item in input]
     '''
-
     def forward(self, xx):
+        #1st dimension-trainset size, 2nd dimension-layer width
+        z0 = torch.tensor(xx.transpose(), dtype=torch.float32)
+        z_out = self.forward_(z0)
+        return z_out.detach().numpy().transpose()
+    
+    def forward_(self, zk):
         if self.slope_positive == None:
             raise Exception("To use forward set slopes with call ParametricReLUNet.set_slopes(...)")
 
@@ -34,17 +40,16 @@ class ParametricReLUNet(FFNGmetricLogging):
         if self.pre_indices != None:
             self.PRE = dict.fromkeys(self.pre_indices, None)
 
-        #1st dimension-trainset size, 2nd dimension-layer width
-        zk = torch.tensor(xx.transpose(), dtype=torch.float32)
         self.trigger_on_forward_step_activ_callbacks(zk.detach().numpy())
 
         for linear in self.hidden_linears:
             zk = linear(zk)
             self.trigger_on_forward_step_preactiv_callbacks(zk.detach().numpy())
             zk = self.PReLU(zk)
+            #zk = F.relu(zk)
             self.trigger_on_forward_step_activ_callbacks(zk.detach().numpy())
 
         zk = self.output_linear(zk)
         self.trigger_on_forward_step_preactiv_callbacks(zk.detach().numpy())
 
-        return zk.detach().numpy().transpose()
+        return zk #.detach().numpy().transpose()

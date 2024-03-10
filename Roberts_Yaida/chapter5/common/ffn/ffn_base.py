@@ -12,9 +12,9 @@ class FeedForwardNet(nn.Module):
            nl: # dimension of y
            l: # number of layers
            bias_on: # whether bias is included into linear preactivations'''
-        if l < 2:
-            raise Exception("FFN must have at least two layers")
         super().__init__()
+#        if l < 2:
+#            raise Exception("FFN must have at least two layers")
         self.n0=n0
         self.nk=nk
         self.nl=nl
@@ -26,11 +26,13 @@ class FeedForwardNet(nn.Module):
         self.cb, self.cw = None, None
         print("FeedForwardNet created with n0={}, nk={}, nl={}, l={}, bias_on={}".format(n0, nk, nl, l, bias_on))
 
-        self.hidden_linears.append(nn.Linear(n0, nk, bias=bias_on))
+        if l > 0:
+            self.hidden_linears.append(nn.Linear(n0, nk, bias=bias_on))
         if l > 2:
             for _ in range(2, l):
                 self.hidden_linears.append(nn.Linear(nk, nk, bias=bias_on))
-        self.output_linear = nn.Linear(nk, nl, bias=bias_on)
+        if l > 1:
+            self.output_linear = nn.Linear(nk, nl, bias=bias_on)
 
     def set_log_level(self, value):
         self.log_level = value
@@ -47,12 +49,14 @@ class FeedForwardNet(nn.Module):
 
         #Weight initialisation as in 2.19, 2.20
         self.cb, self.cw = cb, cw
-        n_prev = self.n0
+        #n_prev = self.n0
         for linear in self.hidden_linears:
-            self.init_linear_weights(linear, self.bias_on, cb, cw/n_prev)
-            n_prev = linear.weight.size()[0]
+            self.init_linear_weights(linear, self.bias_on, cb, cw/linear.in_features)
+            #self.init_linear_weights(linear, self.bias_on, cb, cw/n_prev)
+            #n_prev = linear.weight.size()[0]#???
 
-        self.init_linear_weights(self.output_linear, self.bias_on, cb, cw/n_prev)
+        #self.init_linear_weights(self.output_linear, self.bias_on, cb, cw/n_prev)
+        self.init_linear_weights(self.output_linear, self.bias_on, cb, cw/self.output_linear.in_features)
 
     @staticmethod
     def init_linear_weights(linear, bias_on, var_b=1.0, var_w=1.0):
