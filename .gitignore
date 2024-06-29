@@ -8,3 +8,7 @@ tmp
 /Roberts_Yaida/chapter5/MNIST
 /Roberts_Yaida/chapter5/cifar-10-batches-py
 /Roberts_Yaida/chapter5/cifar-10-python.tar.gz
+/Roberts_Yaida/chapter5/Log_Test_File.txt
+/Roberts_Yaida/chapter5/convergence_onestep_minst-save.ipynb
+/Roberts_Yaida/chapter5/*.txt
+/Roberts_Yaida/chapter5/*.log

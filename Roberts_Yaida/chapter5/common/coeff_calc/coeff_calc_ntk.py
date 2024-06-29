@@ -9,17 +9,31 @@ class NTKSimulator:
         self.act, self.drv = act, drv
         self.n_samples = n_samples
     
+    def calculate_permutations(self, vec):
+        indices = vec.shape[1]
+        res = np.zeros((indices, indices))
+        for row in range(indices):
+            for col in range(row + 1):
+                res[row, col] = res[col, row] = np.average(vec[:,row]*vec[:,col])
+        return res
+
     def calculate_form2(self, cov, n_samples=1000000):
         raw = np.random.multivariate_normal(mean=np.zeros_like(cov[0]), cov=cov, size=n_samples)
-        raw_act = self.act(raw)#.mean(axis=0)
-        raw_drv = self.drv(raw)#.mean(axis=0)
+        raw_act = self.act(raw)
+        raw_drv = self.drv(raw)
+        '''
         form2_act = (raw_act[:, :, None] * raw_act[:, None, :]).mean(axis=0)
         form2_drv = (raw_drv[:, :, None] * raw_drv[:, None, :]).mean(axis=0)
-        #form2_drv = (raw_drv[:, :, None] * raw_drv[:, None, :]).mean(axis=0)
+        '''
+        form2_act = self.calculate_permutations(raw_act)
+        form2_drv = self.calculate_permutations(raw_drv)
         return form2_act, form2_drv
     
     def calculate_layer0(self, KK, Theta, xx):
+        '''
         form2_0 = (xx[:, :, None] * xx[:, None, :]).mean(axis=0)
+        '''
+        form2_0 = self.calculate_permutations(xx)
         KK[0] = self.cb + self.cw * form2_0
         Theta[0] = self.lb + self.lw * form2_0
 

@@ -1,3 +1,5 @@
+import numpy as np
+
 class AverageMeter:
     
     def __init__(self):
@@ -17,6 +19,9 @@ class AverageMeter:
 
 def calculate_accuracy(prediction, target):
     # Note that prediction.shape == target.shape == [B, ]
-    
     matching = (prediction == target).float()
-    return matching.mean()
+    return matching.mean().item()
+
+def calculate_accuracy_np(prediction, target):
+    # Note that prediction.shape == target.shape == [B, ]
+    return np.average(prediction ==target)
