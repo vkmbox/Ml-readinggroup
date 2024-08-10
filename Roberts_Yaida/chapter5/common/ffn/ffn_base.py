@@ -59,7 +59,7 @@ class FeedForwardNet(nn.Module):
         self.init_linear_weights(self.output_linear, self.bias_on, cb, cw/self.output_linear.in_features)
 
     @staticmethod
-    def init_linear_weights(linear, bias_on, var_b=1.0, var_w=1.0):
+    def init_linear_weights(linear, bias_on, var_b=0.0, var_w=1.0):
         nn.init.normal_(linear.weight, mean = 0., std = math.sqrt(var_w)) #approach via torch
         '''
         rows, cols, dims = linear.out_features, linear.in_features, linear.out_features * linear.in_features
@@ -67,6 +67,18 @@ class FeedForwardNet(nn.Module):
         with torch.no_grad():
             linear.weight.copy_(torch.from_numpy(data).float())
         '''
+        if bias_on:
+            nn.init.normal_(linear.bias, mean = 0., std = math.sqrt(var_b))
+
+    @staticmethod
+    def init_orthogonal_weights(linear, bias_on, var_b=0.0, var_w=1.0):
+        rows, cols, dims = linear.out_features, linear.in_features, linear.out_features * linear.in_features
+        data_raw = np.reshape(np.random.normal(0, math.sqrt(var_w), dims), (max(rows,cols), min(rows,cols)))
+        data, _ = np.linalg.qr(data_raw)
+        if rows < cols:
+            data = np.transpose(data)
+        with torch.no_grad():
+            linear.weight.copy_(torch.from_numpy(data).float())        
         if bias_on:
             nn.init.normal_(linear.bias, mean = 0., std = math.sqrt(var_b))
 
