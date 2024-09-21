@@ -71,6 +71,12 @@ class FeedForwardNet(nn.Module):
             nn.init.normal_(linear.bias, mean = 0., std = math.sqrt(var_b))
 
     @staticmethod
+    def init_linear_zeros(linear, bias_on):
+        nn.init.zeros_(linear.weight)
+        if bias_on:
+            nn.init.zeros_(linear.bias)        
+
+    @staticmethod
     def init_orthogonal_weights(linear, bias_on, var_b=0.0, var_w=1.0):
         rows, cols, dims = linear.out_features, linear.in_features, linear.out_features * linear.in_features
         data_raw = np.reshape(np.random.normal(0, math.sqrt(var_w), dims), (max(rows,cols), min(rows,cols)))

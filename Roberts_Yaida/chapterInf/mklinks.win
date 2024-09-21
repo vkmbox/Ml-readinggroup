@@ -1,0 +1,3 @@
+rem mklink /H const.py ..\..\Roberts_Yaida\chapter5\const.py
+rem mklink /H util.py ..\..\Roberts_Yaida\chapter5\util.py
+mklink /J common ..\..\Roberts_Yaida\chapter5\common
