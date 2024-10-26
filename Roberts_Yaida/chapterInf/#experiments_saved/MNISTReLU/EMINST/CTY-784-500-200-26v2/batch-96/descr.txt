@@ -1,0 +1,1 @@
+Experiment is cross-enthropy adjusted vector p-q is minimised for onehothot- n,β with 2-norm

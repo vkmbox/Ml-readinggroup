@@ -49,3 +49,14 @@ def labels_to_onehot(zz_logits, true_labels):
 
     logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_onehot))
     return yy_onehot
+            
+def labels_to_softhot(true_labels, output_dim):
+    batch_size = true_labels.shape[0]
+    yy_softhot = np.zeros((output_dim, batch_size))
+    for batch_num in range(batch_size):
+        for output_num in range(output_dim):
+            yy_softhot[output_num, batch_num] = \
+                1.0 if output_num == true_labels[batch_num] else 0.0
+
+    logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_softhot))
+    return yy_softhot

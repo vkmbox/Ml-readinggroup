@@ -1,8 +1,7 @@
 tmp
 /Roberts_Yaida/chapter5/MNIST
 /Roberts_Yaida/chapter5/EMNIST
-/Roberts_Yaida/chapterInf/EMNIST
-/Roberts_Yaida/chapterInf/MNIST
+/Roberts_Yaida/chapterInf/datasets
 /Roberts_Yaida/chapter5/data
 /Roberts_Yaida/chapter5/jar
 /Roberts_Yaida/chapter5/tmp1.py
@@ -16,3 +15,6 @@ tmp
 __pycache__
 /Roberts_Yaida/chapterInf/libs
 /Roberts_Yaida/chapter5/convergence_twosteps_minst.save.ipynb
+/Roberts_Yaida/chapterInf/#current_saved
+/Cross_Entropy
+/Roberts_Yaida/chapterInf/common

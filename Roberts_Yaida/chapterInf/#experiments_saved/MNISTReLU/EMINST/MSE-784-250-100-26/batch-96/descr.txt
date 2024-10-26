@@ -1,0 +1,11 @@
+BATCH_SIZE = 96
+INPUT_DIM = 28 * 28
+OUTPUT_DIM = 26  # num of classes
+INPUT_WIDTH, HIDDEN_WIDTH = 250, 100
+lb, lw = 1e-2, 7.5
+
+##Step calculates η minimising (∞.86) with NTK-flattering and 2-matrix norm. Parameters change is according to (7.11)
+NTK-flattering: in representation (8.4) i1 != i2 ignored, for different i1 = i2 values averaged among the same α1 and α2, check also frozen NTK: H^l_ij;˜αδ = δijΘ^l_αδ˜ + O(1/n), page 249 in Roberts book. This is true at initialisation but in network with width ~250 depth ~3 NTK changes approx 5-10 times while is learned till 90% accuracy on EMINST-letter dataset.
+The flattering NTK calculated each 5 gradient descent steps in average and averaged among 2 latest calculations with weights 0.6/0.4
+
+Epoch - 40 fetches from the trainpart/gradient descent steps

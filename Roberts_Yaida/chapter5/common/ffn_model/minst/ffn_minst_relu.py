@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 from torch import nn
 
 from common.ffn.ffn_relu import ParametricReLUNet
@@ -26,6 +27,48 @@ class MNISTReLU(ParametricReLUNet):
         y_pred = self.output_fc(h_2)
         #y_pred = [batch size, output dim]
         return y_pred
+    
+    #--NTK-values calculated as in (8.12), based on experiments by Zhang Allan--
+    def forward_ntk(self, x):
+        '''forward when also calculation ntk;
+        x ~ n_samples * input_dim;
+        lw: lambda_w;
+        lb: lambda_b;
+        returns y and ntk of the last layer'''
+        meta = self.meta
+        #1st layer (the "input layer")
+        #x = self.flatten(x)
+        logging.info("##Calculating NTK input layer")
+        with torch.no_grad():
+            H = meta.lw / meta.input_dim * torch.matmul(x.to('cpu'), x.to('cpu').T) + meta.lb
+        y = self.PReLU(self.input_fc(x))
+        with torch.no_grad():
+            yc = y.to('cpu')
+            yp = self.activation_derivative(yc)
+        #2nd layer (the hidden layer)
+            logging.info("##Calculating NTK 2nd layer")
+            w = self.hidden_fc.weight.to('cpu')
+            H = H * yp.T[:, None, :] * yp.T[:, :, None]
+            H = w[:, :, None, None] * H
+            H = torch.tensordot(w, H, ([1], [1]))
+            Hd = torch.movedim(torch.diagonal(H), -1, 0) 
+            Hd += meta.lw / meta.input_width * torch.matmul(yc, yc.T) + meta.lb
+        y = self.PReLU(self.hidden_fc(y))
+        with torch.no_grad():
+            yc = y.to('cpu')
+            yp = self.activation_derivative(yc)
+        #3rd layer (the output layer)
+            logging.info("##Calculating NTK 3rd layer")
+            w = self.output_fc.weight.to('cpu')
+            H *= yp.T[:, None, :, None]
+            H *= yp.T[:, None, :]
+            H = torch.tensordot(w, H, ([1], [1]))
+            H = torch.tensordot(w, H, ([1], [1])) #???
+            Hd = torch.movedim(torch.diagonal(H), -1, 0) 
+            Hd += meta.lw / meta.hidden_width * torch.matmul(yc, yc.T) + meta.lb
+        y = self.output_fc(y)
+        logging.info("##Calculating NTK finished")
+        return y, H
     
     def init_weights(self, cb=0.0, cw=1.0):
         if self.get_log_level() == "debug":
@@ -65,3 +108,8 @@ class MNISTReLU(ParametricReLUNet):
         calc0.delta_weight_02 = np.loadtxt(dir_name + '/output_weight.out', delimiter=',')
         calc0.delta_bias_02 = np.loadtxt(dir_name + '/output_bias.out', delimiter=',')        
         calc0.do_step0(self)
+
+    def activation_derivative(self, xx):
+        '''calculate the derivative of relu'''
+        return torch.where(xx>0, self.slope_positive, self.slope_negative)
+

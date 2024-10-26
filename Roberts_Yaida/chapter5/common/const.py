@@ -1,3 +1,5 @@
+DATASET_PATH = "./datasets"
+
 avex_g="Average criticality-experimental G-values"
 #avex_sub_g="Average subcriticality-experimental G-values"
 #avex_super_g="Average supercriticality-experimental G-values"

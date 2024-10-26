@@ -1,0 +1,1 @@
+Experiment is cross-enthropy adjusted but vector p-q is minimised for all n,β with Frobenius norm
