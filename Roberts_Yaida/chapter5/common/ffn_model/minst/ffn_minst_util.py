@@ -25,7 +25,7 @@ class MetaData:
 
     #lambdas_w as from (8.5)
     def lw_input(self):
-        return self.lw/self.input_dim,
+        return self.lw/self.input_dim
     
     def lw_hidden(self):
         return self.lw/self.input_width
