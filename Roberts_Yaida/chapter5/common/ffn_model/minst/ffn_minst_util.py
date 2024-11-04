@@ -110,12 +110,12 @@ class StepCalculatorBase:
 
     def do_step0(self, testNet, delta = 1.0):
         with torch.no_grad():
-            testNet.input_fc.weight += torch.from_numpy(self.delta_weight_00) * delta
-            testNet.input_fc.bias += torch.from_numpy(self.delta_bias_00) * delta
-            testNet.hidden_fc.weight += torch.from_numpy(self.delta_weight_01) * delta
-            testNet.hidden_fc.bias += torch.from_numpy(self.delta_bias_01) * delta
-            testNet.output_fc.weight += torch.from_numpy(self.delta_weight_02) * delta
-            testNet.output_fc.bias += torch.from_numpy(self.delta_bias_02) * delta
+            testNet.input_fc.weight += self.delta_weight_00 * delta #torch.from_numpy(self.delta_weight_00) * delta
+            testNet.input_fc.bias += self.delta_bias_00 * delta #torch.from_numpy(self.delta_bias_00) * delta
+            testNet.hidden_fc.weight += self.delta_weight_01 * delta #torch.from_numpy(self.delta_weight_01) * delta
+            testNet.hidden_fc.bias += self.delta_bias_01 * delta #torch.from_numpy(self.delta_bias_01) * delta
+            testNet.output_fc.weight += self.delta_weight_02 * delta #torch.from_numpy(self.delta_weight_02) * delta
+            testNet.output_fc.bias += self.delta_bias_02 * delta #torch.from_numpy(self.delta_bias_02) * delta
 
 ##Step calculates η minimising (∞.86) with NTK-averaging and 2-matrix norm. Parameters change is according to (7.11)
 class StepCalculatorEtaAveragedNtk(StepCalculatorBase):
