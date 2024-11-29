@@ -31,7 +31,7 @@ def calculate_accuracy_np(prediction, target):
 
 def loss_crossentropy(zz_logits, true_labels):
     batch_size = len(true_labels)
-    qq = softmax(zz_logits, axis=(0))
+    qq = softmax(zz_logits, axis=(0)) + 1e-8
     pp = np.zeros_like(qq)
     for col in range(batch_size):
         pp[true_labels[col],col]=1
@@ -47,7 +47,7 @@ def labels_to_onehot(zz_logits, true_labels):
                     if output_num == true_labels[batch_num] \
                     else min(-1.0, zz_logits[batch_num, output_num])
 
-    logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_onehot))
+    #logging.trace("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_onehot))
     return yy_onehot
             
 def labels_to_softhot(true_labels, output_dim):
@@ -55,9 +55,6 @@ def labels_to_softhot(true_labels, output_dim):
     yy_softhot = np.zeros((output_dim, batch_size))
     for batch_num in range(batch_size):
         yy_softhot[true_labels[batch_num], batch_num] = 1.0
-    #    for output_num in range(output_dim):
-    #        yy_softhot[output_num, batch_num] = \
-    #            1.0 if output_num == true_labels[batch_num] else 0.0
 
-    logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_softhot))
+    #logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_softhot))
     return yy_softhot
