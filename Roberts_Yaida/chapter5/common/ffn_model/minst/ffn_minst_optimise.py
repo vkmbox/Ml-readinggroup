@@ -10,12 +10,12 @@ from common.util import labels_to_softhot
 
 import logging
 
-# Faster version of ntkvp. Computes sum_{j,b} H_{i,j,a,b} v_{j,b}. Contributed by Zhang Allan
 def ntkvp2_np(func_single, func_mul, params, x1, x2, delta, lbd_dict=None):
     v = torch.from_numpy(np.transpose(delta))
     result = ntkvp2(func_single, func_mul, params, x1, x2, v, lbd_dict)
     return np.transpose(result.detach().numpy())
 
+# Faster version of ntkvp. Computes sum_{j,b} H_{i,j,a,b} v_{j,b}. Contributed by Zhang Allan
 def ntkvp2(func_single, func_mul, params, x1, x2, v, lbd_dict=None):
     '''
     lbd_dict: dict ~ {param_name: lambda},
