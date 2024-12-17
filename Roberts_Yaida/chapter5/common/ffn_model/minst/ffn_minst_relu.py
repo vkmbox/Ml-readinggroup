@@ -91,24 +91,24 @@ class MNISTReLU(ParametricReLUNet):
     '''
 
     def save_txt(self, dir_name):
-        np.savetxt(dir_name + '/input_weight.out', self.input_fc.weight.detach().numpy(), delimiter=',')
-        np.savetxt(dir_name + '/input_bias.out', self.input_fc.bias.detach().numpy(), delimiter=',')
-        np.savetxt(dir_name + '/hidden_weight.out', self.hidden_fc.weight.detach().numpy(), delimiter=',')
-        np.savetxt(dir_name + '/hidden_bias.out', self.hidden_fc.bias.detach().numpy(), delimiter=',')
-        np.savetxt(dir_name + '/output_weight.out', self.output_fc.weight.detach().numpy(), delimiter=',')
-        np.savetxt(dir_name + '/output_bias.out', self.output_fc.bias.detach().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/input_weight.out', self.input_fc.weight.detach().cpu().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/input_bias.out', self.input_fc.bias.detach().cpu().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/hidden_weight.out', self.hidden_fc.weight.detach().cpu().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/hidden_bias.out', self.hidden_fc.bias.detach().cpu().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/output_weight.out', self.output_fc.weight.detach().cpu().numpy(), delimiter=',')
+        np.savetxt(dir_name + '/output_bias.out', self.output_fc.bias.detach().cpu().numpy(), delimiter=',')
 
-    def init_weights_txt(self, dir_name):
+    def init_weights_txt(self, dir_name, device):
         self.init_linear_zeros(self.input_fc, self.bias_on)
         self.init_linear_zeros(self.hidden_fc, self.bias_on)
         self.init_linear_zeros(self.output_fc, self.bias_on)
         calc0 = StepCalculatorBase()
-        calc0.delta_weight_00 = torch.from_numpy(np.loadtxt(dir_name + '/input_weight.out', delimiter=','))
-        calc0.delta_bias_00 = torch.from_numpy(np.loadtxt(dir_name + '/input_bias.out', delimiter=','))
-        calc0.delta_weight_01 = torch.from_numpy(np.loadtxt(dir_name + '/hidden_weight.out', delimiter=','))
-        calc0.delta_bias_01 = torch.from_numpy(np.loadtxt(dir_name + '/hidden_bias.out', delimiter=','))
-        calc0.delta_weight_02 = torch.from_numpy(np.loadtxt(dir_name + '/output_weight.out', delimiter=','))
-        calc0.delta_bias_02 = torch.from_numpy(np.loadtxt(dir_name + '/output_bias.out', delimiter=','))       
+        calc0.delta_weight_00 = torch.from_numpy(np.loadtxt(dir_name + '/input_weight.out', delimiter=',')).to(device)
+        calc0.delta_bias_00 = torch.from_numpy(np.loadtxt(dir_name + '/input_bias.out', delimiter=',')).to(device)
+        calc0.delta_weight_01 = torch.from_numpy(np.loadtxt(dir_name + '/hidden_weight.out', delimiter=',')).to(device)
+        calc0.delta_bias_01 = torch.from_numpy(np.loadtxt(dir_name + '/hidden_bias.out', delimiter=',')).to(device)
+        calc0.delta_weight_02 = torch.from_numpy(np.loadtxt(dir_name + '/output_weight.out', delimiter=',')).to(device)
+        calc0.delta_bias_02 = torch.from_numpy(np.loadtxt(dir_name + '/output_bias.out', delimiter=',')).to(device)    
         calc0.do_step0(self)
 
     def activation_derivative(self, xx):

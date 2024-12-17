@@ -1,7 +1,6 @@
 import numpy as np
 import math
-from sklearn.metrics import mean_squared_error
-from random import randrange
+import itertools as itr
 
 import torch
 from torch import Tensor
@@ -14,59 +13,85 @@ from scipy.linalg import svdvals, norm
 from scipy.special import softmax
 from scipy.optimize import minimize_scalar
 
-from common.util import *
+#from common.util import *
 
 import logging
 
-def ntkvp2_np(func_single, func_mul, params, x1, x2, delta, device, lbd_dict=None):
-    v = torch.from_numpy(np.transpose(delta)).to(device)
-    result = ntkvp2(func_single, func_mul, params, x1, x2, v, lbd_dict)
-    return np.transpose(result.detach().cpu().numpy())
+def calc_ce_loss(pp, qq, meta):
+    loss = -torch.sum(pp * torch.log(qq))
+    if meta.reduction == 'mean':
+        loss = loss/meta.batch_size
+    return loss
 
-# Faster version of ntkvp. Computes sum_{j,b} H_{i,j,a,b} v_{j,b}. Contributed by Zhang Allan
-def ntkvp2(func_single, func_mul, params, x1, x2, v, lbd_dict=None):
-    '''
-    lbd_dict: dict ~ {param_name: lambda},
-        if None, all lambda = 1
-    v ~ (n_samples * output_dim)
-    x1, x2 ~ (n_samples * input_dim)
-    '''
-    vjps = grad(lambda pa: (func_mul(pa, x2)*v).sum())(params)
-    if lbd_dict is not None:
-        for pn in vjps:
-            vjps[pn] *= lbd_dict.get(pn, 1.)
-    vjps = (vjps,)
-    def get_ntkv(x1, vjps):
-        def func_x1(params):
-                return func_single(params, x1)
-        # This computes J(X1) @ vjps
-        _, jvps = jvp(func_x1, (params,), vjps)
-        return jvps
+def labels_to_softhot(true_labels, meta):
+    batch_size = true_labels.shape[0]
+    with torch.no_grad():
+        yy_softhot = torch.zeros(meta.output_dim, batch_size).to(meta.device)
+        for batch_num in range(batch_size):
+            yy_softhot[true_labels[batch_num], batch_num] = 1.0
 
-    result = vmap(get_ntkv, (0, None))(x1, vjps)
-    return result
+    #logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_softhot))
+    return yy_softhot
 
-def solve_eta_norm2(delta_r, delta):
+#Grad optionally multiplied by lambda
+def calc_autograd(model, logits, meta):
+    batch_size = logits.shape[0]
+    param_buffer, grad_buffer ={}, {}
+    for name, param in model.named_parameters():
+        param_buffer[name] = param
+        dimensions = list(param.shape)
+        dimensions.insert(0, batch_size)
+        dimensions.insert(0, meta.output_dim)
+        grad_buffer[name] = torch.empty(dimensions)
+
+    for alpha, kk in itr.product(range(batch_size), range(meta.output_dim)):
+        df = torch.autograd.grad(logits[alpha,kk], param_buffer.values(), retain_graph=True, create_graph=True, allow_unused=True)
+        with torch.no_grad():
+            ii = 0
+            for name in param_buffer:
+                #update = df[ii].detach().clone()
+                #print("update dim={}, buffer dim={}".format(update.shape, grad_buffer[name].shape))
+                grad_buffer[name][kk,alpha] = df[ii].detach().clone()
+                ii += 1
+
+    return grad_buffer
+
+def ntk_reduced(grad_buffer, delta, meta, lambda_dict=None):
+    batch_size = delta.shape[1]
+    with torch.no_grad():
+        gamma2 = torch.zeros(meta.output_dim, batch_size).to(meta.device)
+        for name, grad in grad_buffer.items():
+            lambda_value = lambda_dict.get(name, 1.) if lambda_dict is not None else 1.
+            grad_flatten = torch.flatten(grad, start_dim=2).to(meta.device) #TODO: check if possible to flattern via view
+            term0 = torch.sum(grad_flatten*delta[:, :, None], (0,1)).to(meta.device)
+            gamma2 += lambda_value*torch.sum(term0[None, None, :]*grad_flatten, (2))
+        return gamma2
+
+def ntk_softmax_reduced(gamma2, qq, meta):
+    with torch.no_grad():
+        SM = (torch.eye(meta.output_dim).to(meta.device)[:,:,None] - qq[:,None,:])*qq[None,:,:]
+        return torch.sum(SM[:,:,:]*gamma2[:,None,:], 0)
+
+def solve_eta_norm2(RR, delta): #RR, delta
     '''
     get eta which minimizes rhs of \inf.86
     delta_r, delta ~ (n_samples, n_outputs)
     delta: p - q
     delta_r: R_ab
     '''
-    return np.sum((delta*delta_r)) / np.sum((delta_r**2))
+    with torch.no_grad():
+        return torch.sum(RR*delta) / torch.sum(RR**2)
 
-def NTK_softmaxV3(HL, qq, meta):
-    SM = (np.identity(meta.output_dim)[:,:,None] - qq[:,None,:])*qq[None,:,:]
-    return np.sum(SM[:,:,:]*HL[:,None,:], axis=0)
-
-def reduce_to_active(MX_FULL, pp):
-    return np.sum(MX_FULL*pp, axis=0)
+def reduce_to_active(matrix_full, pp):
+    with torch.no_grad():
+        return torch.sum(matrix_full*pp, 0)
 
 class ParameterProcessor:
-    def __init__(self):
+    def __init__(self, meta):
         self.theta_current = {}
         self.delta_current = {}
         self.grad_current = {}
+        self.meta = meta
 
     def is_delta_empty(self):
         return len(self.delta_current) <= 0
@@ -97,34 +122,53 @@ class ParameterProcessor:
                     raise ValueError("eta_scale or momentum must be in interval(0., 1.)")
 
     def save_delta_current(self, momentum, eta, eta_scale = 1.0):
-        for name, grad in self.grad_current.items():
-            delta = self.delta_current.get(name, None)
-            if delta is None or momentum <= 0.0:
-                self.delta_current[name] = -eta * eta_scale * grad
-            else:
-                self.delta_current[name] = momentum * delta - eta * eta_scale * grad
+        with torch.no_grad():
+            for name, grad in self.grad_current.items():
+                delta = self.delta_current.get(name, None)
+                if delta is None or momentum <= 0.0:
+                    self.delta_current[name] = -eta * eta_scale * grad
+                else:
+                    self.delta_current[name] = momentum * delta - eta * eta_scale * grad
 
     #Grad optionally multiplied by lambda
-    def calc_autograd(self, model, loss, lambda_dict=None):
-        param_buffer ={}
-        for name, param in model.named_parameters():
-            param_buffer[name] = param        
-        df = torch.autograd.grad(loss, param_buffer.values(), retain_graph=True, create_graph=True, allow_unused=True)
-        grad_norm2_squared = 0.
-        ii = 0
-        for name in param_buffer:
-            lambda_value = lambda_dict.get(name, 1.) if lambda_dict is not None else 1.
-            grad = df[ii].detach().clone()
-            self.grad_current[name] = lambda_value * grad
-            grad_norm2_squared += ((grad)**2).sum().item()
-            ii += 1
+    def calc_ce_theta_delta(self, grad_buffer, pp, qq, lambda_dict=None):
+        meta = self.meta
+        self.grad_current ={}
+        with torch.no_grad():
+            delta = (qq-pp).to(meta.device)
+            grad_norm2_squared = 0.
+            ii = 0
+            for name, grad_pre0 in grad_buffer.items():
+                grad_pre = grad_pre0.to(meta.device) #torch.flatten(grad_pre0, start_dim=0, end_dim=1).to(meta.device)
+                lambda_value = lambda_dict.get(name, 1.) if lambda_dict is not None else 1.
+                if meta.reduction == 'mean':
+                    lambda_value = lambda_value/meta.batch_size
+                grad = None
+                if grad_pre.ndim == 3:
+                    grad = torch.sum(grad_pre * delta[:,:,None], (0,1))
+                    self.grad_current[name] = lambda_value * grad
+                elif grad_pre.ndim == 4:
+                    grad = torch.sum(grad_pre * delta[:,:,None, None], (0,1))
+                    self.grad_current[name] = lambda_value * grad
+                elif grad_pre.ndim == 5:
+                    grad = torch.sum(grad_pre * delta[:,:,None, None, None], (0,1))
+                    self.grad_current[name] = lambda_value * grad
+                elif grad_pre.ndim == 6:
+                    grad = torch.sum(grad_pre * delta[:,:,None, None, None, None], (0,1))
+                    self.grad_current[name] = lambda_value * grad
+                else:
+                    raise Exception("Unexpected dim number for shape={}".format(grad_pre.shape))
 
-        return grad_norm2_squared
+                self.grad_current[name] = lambda_value * grad
+                ii += 1
+                grad_norm2_squared += ((grad)**2).sum().item() #TODO: meta.reduction == 'mean'
+
+            return grad_norm2_squared
 
 class StepProcessor:
     def __init__(self, meta, epsilon):
-        self.paramProcessor = ParameterProcessor()
         self.meta=meta
+        self.paramProcessor = ParameterProcessor(meta)
         self.epsilon = epsilon
         self.epsilon_criteria = 1e-5
         self.step_one = 1.0
@@ -252,16 +296,17 @@ class OptimiserEtaSoftmaxArmihoBase:
         self.eta_min = self.epsilon
         self.eta_max = 10.0
         self.lbd_dict = lbd_dict
-        self.criterion = nn.CrossEntropyLoss()
+        #self.criterion = nn.CrossEntropyLoss()
         self.stepProcessor = StepProcessor(meta, self.epsilon)
         self.paramProcessor = self.stepProcessor.paramProcessor
         self.check_dropout = True
 
-    def calc_eta(self, testNet, xx, pp, qq):
+    def calc_eta(self, testNet, images, pp, qq):
         pass
 
-    def step(self, testNet, labels, xx, momentum, Nesterov = False, use_ones = False, use_fix = False, use_linear = False):
+    def step(self, testNet, labels, images, momentum, Nesterov = False, use_ones = False, use_fix = False):
         meta = self.meta
+        pp = labels_to_softhot(labels, meta)
         #logging.info("##Bias_0 step-start:{}".format(testNet.conv1.bias[0].item()))
 
         self.paramProcessor.save_theta(testNet)
@@ -269,33 +314,30 @@ class OptimiserEtaSoftmaxArmihoBase:
             self.paramProcessor.set_theta(testNet, momentum, 0., 0.)
             #logging.info("##Bias_0 Nesterov pre-set:{}".format(testNet.conv1.bias[0].item()))
 
+        testNet.zero_grad()
+        logits = testNet.forward_(images)
+        qq = (F.softmax(torch.transpose(logits, 0, 1), dim=0) + self.epsilon).to(meta.device)
+        grad_buffer = calc_autograd(testNet, logits, meta)
         if not use_fix:
-            if self.check_dropout:
-                do_dropout_val = testNet.do_dropout
-                testNet.do_dropout = False
-            with torch.no_grad():
-                logits_detached = testNet.forward_(xx).detach().cpu().numpy().copy()
-            pp = labels_to_softhot(labels, meta.output_dim)
-            qq = softmax(np.transpose(logits_detached), axis=(0)) + self.epsilon
-            eta_ones, eta_all = self.calc_eta(testNet, xx, pp, qq)
-            if self.check_dropout:
-                testNet.do_dropout = do_dropout_val
+            eta_ones, eta_all = self.calc_eta(grad_buffer, pp, qq)
         
         logging.info("##Calculating params-delta")
-        testNet.zero_grad()
-        logits = testNet.forward_(xx)
-        loss = self.criterion(logits, labels)
-        grad_norm22 = self.paramProcessor.calc_autograd(testNet, loss, self.lbd_dict)
+        #testNet.zero_grad()
+        #logits = testNet.forward_(xx)
+        #loss = self.criterion(logits, labels)
+        with torch.no_grad():
+            grad_norm22 = self.paramProcessor.calc_ce_theta_delta(grad_buffer, pp, qq, self.lbd_dict)
         #logging.info("##Bias_0 calc_autograd:{}".format(self.paramProcessor.grad_current['conv1.bias'][0].item()))
         grad_lipsh_est = math.sqrt(grad_norm22) #/meta.batch_size
+        loss = calc_ce_loss(pp, qq, meta)
         logging.info("##Min-grad value est = {}, grad_norm2^2={}, simple_step={}"\
-                     .format(2*(1-self.stepProcessor.c1)/(grad_lipsh_est), grad_norm22, loss/grad_norm22))
+                     .format(2*(1-self.stepProcessor.c1)/(grad_lipsh_est), grad_norm22, loss.item()/grad_norm22))
 
         eta, eta_scale = self.eta_min, 1.0
         ck_armiho, ck_wolf = 0.0, 1.0
         if not use_fix:
-            eta = (eta_ones if use_ones else eta_all)
-            if use_linear:
+            eta = eta_ones if use_ones else eta_all
+            if meta.reduction == 'mean':
                 eta = eta*meta.batch_size
                 
             logging.info("##Eta value = {}".format(eta))
@@ -306,6 +348,7 @@ class OptimiserEtaSoftmaxArmihoBase:
                 logging.info("##Eta changed from {} to {}".format(eta, self.eta_max))
                 eta = self.eta_max
 
+            '''
             if self.check_dropout:
                 do_dropout_val = testNet.do_dropout
                 testNet.do_dropout = False
@@ -313,10 +356,12 @@ class OptimiserEtaSoftmaxArmihoBase:
                 self.stepProcessor.backtrack_armiho_wolf_additional(testNet, xx, pp, qq, eta, momentum)
             if self.check_dropout:
                 testNet.do_dropout = do_dropout_val
-        else:
+            '''
+        #else:
+        with torch.no_grad():
             self.paramProcessor.set_theta(testNet, momentum, eta, 1.0)
             #logging.info("##Bias_0 initial 1.0:{}".format(testNet.conv1.bias[0].item()))
-            logits_k = testNet.forward_(xx)            
+            logits_k = testNet.forward_(images)            
 
         self.paramProcessor.save_delta_current(momentum, eta, eta_scale)
         #logging.info("##Bias_0 delta:{}".format(self.paramProcessor.delta_current['conv1.bias'][0].item()))
@@ -327,55 +372,45 @@ class OptimiserEtaSoftmaxArmihoNorm2Base(OptimiserEtaSoftmaxArmihoBase):
     def __init__(self, meta, device, momentum=0.9, lbd_dict=None):
         super().__init__(meta, device, momentum, lbd_dict)
 
-    def calc_eta(self, testNet, xx, pp, qq):
-        meta = self.meta
-        delta = pp - qq
-        delta0 = reduce_to_active(delta, pp)
+    def calc_eta(self, grad_buffer, pp, qq):
+        with torch.no_grad():
+            meta = self.meta
+            delta = (pp - qq).to(meta.device)
+            delta1 = reduce_to_active(delta, pp).to(meta.device)
 
-        logging.info("##Calculating reduced NTK")
-        params = {k: v.detach().clone().to(self.device) for k, v in testNet.named_parameters()}
-        fnet_single = lambda params, x: functional_call(testNet, params, (x.unsqueeze(0),)).squeeze(0)
-        fnet_mul = lambda params, x: functional_call(testNet, params, (x,))
-        #Reduced NTK
-        #delta_r = ntkvp_np(fnet_single, params, xx, xx, delta, self.lbd_dict)
-        delta_r = ntkvp2_np(fnet_single, fnet_mul, params, xx, xx, delta, self.device, self.lbd_dict)
-        logging.info("##Calculating step-forward and eta")
-        NL_r = NTK_softmaxV3(delta_r, qq, meta)
-        delta0_r = reduce_to_active(NL_r, pp)
-        eta = solve_eta_norm2(NL_r, delta) #for all n,α
-        eta_ones = solve_eta_norm2(delta0_r, delta0) #for each α only n with pp=1 is taken
-        logging.info("##Calculated eta for ones = {}, general eta = {}".format(eta_ones, eta))
-        return eta_ones, eta
+            logging.info("##Calculating reduced softmax NTK")
+            gamma = ntk_reduced(grad_buffer, delta, meta, self.lbd_dict)
+            RR = ntk_softmax_reduced(gamma, qq, meta)
+            RR1 = reduce_to_active(RR, pp)
+            logging.info("##Calculating eta")
+            eta = solve_eta_norm2(RR, delta) #for all n,α
+            eta_ones = solve_eta_norm2(RR1, delta1) #for each α only n with pp=1 is taken
+            logging.info("##Calculated eta for ones = {}, general eta = {}".format(eta_ones, eta))
+            return eta_ones, eta
 
 class OptimiserEtaSoftmaxArmihoNorm1Base(OptimiserEtaSoftmaxArmihoBase):
     def __init__(self, meta, device, momentum=0.9, lbd_dict=None):
         super().__init__(meta, device, momentum, lbd_dict)    
 
-    def calc_eta(self, testNet, xx, pp, qq):
-        meta = self.meta
-        delta = pp - qq
+    def calc_eta(self, grad_buffer, pp, qq):
+        with torch.no_grad():
+            meta = self.meta
+            delta = pp - qq
+            delta1 = reduce_to_active(delta, pp)
 
-        logging.info("##Calculating reduced NTK")
-        params = {k: v.detach().clone().to(self.device) for k, v in testNet.named_parameters()}
-        fnet_single = lambda params, x: functional_call(testNet, params, (x.unsqueeze(0),)).squeeze(0)
-        fnet_mul = lambda params, x: functional_call(testNet, params, (x,))
-        #Reduced NTK
-        #delta_r = ntkvp_np(fnet_single, params, xx, xx, delta, self.lbd_dict)
-        delta_r = ntkvp2_np(fnet_single, fnet_mul, params, xx, xx, delta, self.device, self.lbd_dict)
-
-        logging.info("##Calculating step-forward and eta")
-        NL_r = NTK_softmaxV3(delta_r, qq, meta)
-        logging.info("##Calculating eta minimising norm_1 for delta_0 - eta*R")
-        delta_flat, NL_r_flat = delta.flatten(), NL_r.flatten()
-        fun = lambda eta: norm(delta_flat - eta*NL_r_flat, ord=1)
-        res = minimize_scalar(fun, bounds=(0, 1000))
-        logging.info("##Optimal point for all found: {}".format(res))
-        eta = res.x
-        #for ones in softmax-encoding
-        delta_ones, NL_r_ones = reduce_to_active(delta, pp), reduce_to_active(NL_r, pp)
-        fun_ones = lambda eta_ones: norm(delta_ones - eta_ones*NL_r_ones, ord=1)
-        res_ones = minimize_scalar(fun_ones, bounds=(0, 1000))
-        logging.info("##Optimal point for ones found: {}".format(res_ones))
-        eta_ones = res_ones.x        
-        logging.info("##Calculated eta for ones = {}, general eta = {}".format(eta_ones, eta))
-        return eta_ones, eta
+            logging.info("##Calculating reduced softmax NTK")
+            gamma = ntk_reduced(grad_buffer, delta, meta, self.lbd_dict)
+            RR = ntk_softmax_reduced(gamma, qq, meta)
+            RR1 = reduce_to_active(RR, pp)
+            logging.info("##Calculating eta minimising norm_1 for delta all")
+            fun = lambda eta: norm(torch.flatten(delta - eta*RR), ord=1)
+            res = minimize_scalar(fun, bounds=(0, 1000))
+            logging.info("##Optimal point for all found: {}".format(res))
+            eta = res.x
+            #for ones in softmax-encoding
+            fun_ones = lambda eta_ones: norm(delta1 - eta_ones*RR1, ord=1)
+            res_ones = minimize_scalar(fun_ones, bounds=(0, 1000))
+            logging.info("##Optimal point for ones found: {}".format(res_ones))
+            eta_ones = res_ones.x        
+            logging.info("##Calculated eta for ones = {}, general eta = {}".format(eta_ones, eta))
+            return eta_ones, eta
