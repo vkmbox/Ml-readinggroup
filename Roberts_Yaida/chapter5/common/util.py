@@ -58,3 +58,6 @@ def labels_to_softhot(true_labels, output_dim):
 
     #logging.debug("For labels\n{}\nonehots are:\n{}".format(true_labels, yy_softhot))
     return yy_softhot
+
+def reduce_to_active(MX_FULL, pp):
+    return np.sum(MX_FULL*pp, axis=0)

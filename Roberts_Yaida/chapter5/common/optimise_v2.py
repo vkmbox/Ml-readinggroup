@@ -81,6 +81,7 @@ def solve_eta_norm2(RR, delta): #RR, delta
     '''
     with torch.no_grad():
         return torch.sum(RR*delta) / torch.sum(RR**2)
+    #eta1 = (torch.sum(pq_delta*qq_delta)/torch.sum(qq_delta*qq_delta)).item()
 
 def reduce_to_active(matrix_full, pp):
     with torch.no_grad():
@@ -141,8 +142,8 @@ class ParameterProcessor:
             for name, grad_pre0 in grad_buffer.items():
                 grad_pre = grad_pre0.to(meta.device) #torch.flatten(grad_pre0, start_dim=0, end_dim=1).to(meta.device)
                 lambda_value = lambda_dict.get(name, 1.) if lambda_dict is not None else 1.
-                if meta.reduction == 'mean':
-                    lambda_value = lambda_value/meta.batch_size
+                #if meta.reduction == 'mean':
+                #    lambda_value = lambda_value/meta.batch_size
                 grad = None
                 if grad_pre.ndim == 3:
                     grad = torch.sum(grad_pre * delta[:,:,None], (0,1))
@@ -337,8 +338,8 @@ class OptimiserEtaSoftmaxArmihoBase:
         ck_armiho, ck_wolf = 0.0, 1.0
         if not use_fix:
             eta = eta_ones if use_ones else eta_all
-            if meta.reduction == 'mean':
-                eta = eta*meta.batch_size
+            #if meta.reduction == 'mean':
+            #    eta = eta*meta.batch_size
                 
             logging.info("##Eta value = {}".format(eta))
             if eta < self.eta_min or math.isnan(eta):
