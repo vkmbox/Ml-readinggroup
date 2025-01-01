@@ -1,6 +1,6 @@
 class MetaData:
     def __init__(self, batch_size = 96, input_dim = 784, input_width = 250, hidden_width = 100, output_dim = 26, reduction='mean'\
-                 , device='cpu', lb = 1e-2, lw = 7.5):
+                 , device='cpu', check_dropout=False, lb = 1e-2, lw = 7.5):
         self.batch_size = batch_size
         self.input_dim = input_dim  # image 28*28
         self.input_width = input_width
@@ -10,6 +10,7 @@ class MetaData:
         self.lw = lw
         self.reduction=reduction
         self.device = device
+        self.check_dropout=check_dropout
 
     #lambdas_w as from (8.5)
     def lw_input(self):

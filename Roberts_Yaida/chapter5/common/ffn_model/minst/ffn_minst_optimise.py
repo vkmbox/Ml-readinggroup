@@ -39,12 +39,6 @@ def ntkvp2(func_single, func_mul, params, x1, x2, v, lbd_dict=None):
     return result
 
 def solve_eta_norm2(delta_r, delta):
-    '''
-    get eta which minimizes rhs of \inf.86
-    delta_r, delta ~ (n_samples, n_outputs)
-    delta: p - q
-    delta_r: R_ab
-    '''
     return np.sum((delta*delta_r)) / np.sum((delta_r**2))
 
 def NTK_softmaxV3(HL, qq, meta):
