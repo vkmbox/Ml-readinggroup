@@ -6,9 +6,7 @@ from torch import nn
 from torch.linalg import vector_norm
 import torch.nn.functional as F
 
-#from scipy.linalg import norm
 import numpy as np
-#from numpy.linalg import vector_norm
 from scipy.optimize import minimize_scalar
 
 import logging
@@ -113,12 +111,13 @@ class NetLineStepProcessor:
         self.device = device
         self.epsilon = 1e-9
         self.epsilon_criteria = 1e-5
-        self.cos_phi2_threshold = 0.9
         self.lbd_dict = lbd_dict
         self.criterion = criterion if criterion is not None else nn.CrossEntropyLoss()
         self.paramProcessor = ParameterProcessor()
         self.momentum_gradient_smoothing_coefficient = 0.0
         self.qu = None
+        self.training_mode = False
+        self.iter_max = 2
 
     #Armiho: Loss(θ+α) <= c1*α*∇Loss(θ) + Loss(θ)
     #Wolf: |∇Loss(θ+α)| <= c2*|∇Loss(θ)|
@@ -131,6 +130,7 @@ class NetLineStepProcessor:
 
         self.eta_min = 0.0001
         self.eta_max = 1.0
+        self.eta_cos_negative = 0.01
         self.eta0 = 0.000001
 
     """
@@ -140,6 +140,8 @@ class NetLineStepProcessor:
     def step(self, labels, images, momentum, nesterov = False, step_params = None):
         net = self.net
         meta = self.meta
+        if net.training:
+            raise ValueError("net.training must be False")
         pp = labels_to_softhot(labels, meta)
         #logging.info("##Bias_0 step-start:{}".format(testNet.conv1.bias[0].item()))
         self.paramProcessor.save_theta(net)
@@ -156,6 +158,8 @@ class NetLineStepProcessor:
             loss = self.criterion(logits, labels)
             grad_norm2 = math.sqrt(self.paramProcessor.calc_autograd(net, loss, self.lbd_dict))
             logging.info("##Gradient norm2:{}".format(grad_norm2))
+            if self.training_mode:
+                logits = self.do_forward(images, 'train') ## all qqxx calculated with dropout off
 
             with torch.no_grad():
                 #Eta-calculation
@@ -166,25 +170,38 @@ class NetLineStepProcessor:
                 self.paramProcessor.set_theta(net, momentum, eta_test) #small step
                 logits_test = self.do_forward(images, 'train') ##TODO: no new dropout generated here, a generated in (1*) must be used
                 qq_test = self.softmax(logits_test, meta) #q(t+1)
-                eta_coeff = self.eta_coeff(eta_test, pp, qq0, qq_test, step_params)
-                eta_raw = eta_test*eta_coeff*momentum_coeff
-                logging.info("##Eta raw-value = {} with momentum_coeff = {}".format(eta_raw, momentum_coeff))
-                eta = self.eta_bounded(eta_raw)
+                pq_cos = self.pq_cos(pp, qq0, qq_test)
+                if pq_cos >= 0.0:
+                    eta_coeff = self.eta_coeff(eta_test, pp, qq0, qq_test, step_params)
+                    eta_raw = eta_test*eta_coeff*momentum_coeff
+                    logging.info("##Eta raw-value = {} with momentum_coeff = {}".format(eta_raw, momentum_coeff))
+                    eta = eta_raw = self.eta_bounded(eta_raw)
+                else:
+                    eta = eta_raw = self.eta_cos_negative
                 
                 #Step with scale 1.0
                 self.paramProcessor.set_theta(net, momentum, eta, 1.0)
                 logits1 = self.do_forward(images, 'train') ##TODO: no new dropout generated here, a generated in (1*) must be used
                 qq1 = self.softmax(logits1, meta)
                 #Linearity estimation
-                cos_phi2 = max(self.qq_cos(qq1, qq_test, qq0, eta/eta_test), 0.01)
-                if cos_phi2 < self.cos_phi2_threshold:
-                    eta_raw = eta_raw*cos_phi2
+                iter_num, iter_cond=0, pq_cos > 0.0
+                while iter_cond: #TODO: cos may go to < 0 during iterations!
+                    coeff_correction = self.eta_coeff_analytic_n2(1.0, pp, qq0, qq1)
+                    logging.info("##Eta raw-value {} corrected to {} with coeff {}".format(eta_raw, eta_raw*coeff_correction, coeff_correction))
+                    eta_raw = eta_raw*coeff_correction
                     #eta = eta*cos_phi2
-                    logging.info("##Eta raw-value corrected on cos(qq1-qq0_est^qq1-qq0_fact):{}".format(eta_raw))
-                    eta = self.eta_bounded(eta_raw)
-                    self.paramProcessor.set_theta(net, momentum, eta, 1.0)
+                    self.paramProcessor.set_theta(net, momentum, eta_raw, 1.0)
                     logits1 = self.do_forward(images, 'train') ##TODO: no new dropout generated here, a generated in (1*) must be used
                     qq1 = self.softmax(logits1, meta)
+                    iter_num += 1
+                    if (iter_num >= self.iter_max) or (2/3 < coeff_correction and coeff_correction < 3/2):
+                        logging.info("##Finall correction-coeff value: {}".format(coeff_correction))
+                        eta = self.eta_bounded(eta_raw)
+                        iter_cond = False
+                        if eta != eta_raw:
+                            self.paramProcessor.set_theta(net, momentum, eta, 1.0)
+                            logits1 = self.do_forward(images, 'train') ##TODO: no new dropout generated here, a generated in (1*) must be used
+                            qq1 = self.softmax(logits1, meta)
 
                 diff_initial = (torch.sum((pp/qq0)*(qq0-qq1))).item()/pp.shape[1]
                 #Momentum gradient-smoothing
@@ -207,7 +224,7 @@ class NetLineStepProcessor:
 
         eta_scale, logits, ck1_armiho, ck1_wolf = \
             self.step_reduction(images, pp, qq0, qq1, logits1, loss_initial, diff_initial, momentum, eta, step_params) \
-                if self.get_param(step_params, 'check_armiho', True) == True or self.get_param(step_params, 'check_additional', True) == True \
+                if pq_cos > 0.0 and (self.get_param(step_params, 'check_armiho', True) == True or self.get_param(step_params, 'check_additional', True) == True) \
                     else self.step_one(logits1)
 
         logging.info("##Eta-value after conditions are applied: {}".format(eta*eta_scale))
@@ -256,24 +273,20 @@ class NetLineStepProcessor:
             
             return eta_scale, logits_k, ck1_armiho, ck1_wolf
 
-    def qq_cos(self, qq1, qq_test, qq0, coeff):
+    def pq_cos(self, pp, qq0, qq_test):
         with torch.no_grad():
-            delta_est = (qq_test-qq0)*coeff
-            delta_fact = qq1-qq0
-            norm_est, norm_fact = norm_fro(delta_est), norm_fro(delta_fact)
-            logging.info("##norm2(qq1-qq0): estimation={}, fact={}".format(norm_est, norm_fact))
-            cos_phi2 = (torch.sum(delta_est*delta_fact)/(norm_est*norm_fact)).item()
-            logging.info("##cos(qq1-qq0_est^qq1-qq0_fact):{}".format(cos_phi2))
-            return cos_phi2
+            delta_pq, delta_qq = pp-qq0, qq_test-qq0
+            norm_pq, norm_qq = norm_fro(delta_pq), norm_fro(delta_qq)
+            cos_phi = (torch.sum(delta_pq*delta_qq)/(norm_pq*norm_qq)).item()
+            logging.info("##cos(pp^qq):{}".format(cos_phi))
+            return cos_phi
 
     def eta_coeff_analytic_n2(self, eta0, pp, qq0, qq_test):
         with torch.no_grad():
             logging.info("##--==Analytic norm_2 formula params==--")
             delta_pq, delta_qq = pp-qq0, qq_test-qq0
             norm_pq, norm_qq = norm_fro(delta_pq), norm_fro(delta_qq)
-            cos_phi1 = (torch.sum(delta_pq*delta_qq)/(norm_pq*norm_qq)).item()
-            #logging.info("##norm(pp-qq0)={},norm(qq_test-qq0)={}".format(norm_pq, norm_qq))
-            logging.info("##cos(pp-qq0^qq_test-qq0):{}".format(cos_phi1))
+            cos_phi1 = self.pq_cos(pp, qq0, qq_test)
             return math.sqrt(max(((norm_pq*cos_phi1)/(norm_qq*eta0 + self.epsilon)), 0.0))
         
     def eta_coeff_iter(self, eta0, pp, qq0, qq_test, norm_ord, ones):
@@ -298,15 +311,12 @@ class NetLineStepProcessor:
             zeros = torch.zeros_like(pp_a)
             epsilons = torch.full_like(pp_a, self.epsilon)
             summand = qqtest_a - qq0_a
-            #logging.info("##\n --==summand: min={}, max={}, avg={}==--"\
-            #                .format(torch.min(summand), torch.max(summand), torch.mean(summand)))            
             fun = lambda coeff: (torch.sum(-pp_a *torch.log(torch.max(qq0_a + coeff*summand, epsilons)))\
                                  +M_const*torch.sum(torch.max(qq0_a + coeff*summand, zeros))).item()
             res = minimize_scalar(fun, bounds=(0, min(1.0, self.eta_max)/eta0))
             qq_active = qq0_a + res.x*summand
             logging.info("##\n --==QQ estimated: min={}, max={}, avg={}==--"\
                             .format(torch.min(qq_active), torch.max(qq_active), torch.mean(qq_active)))
-            #logging.info("##Crossentropy params: {}".format(res))
             return res.x
     
     def softmax(self, logits, meta):
@@ -349,17 +359,14 @@ class NetLineStepProcessor:
             return coeff_crossentropy
         else:
             return coeff_all_itr2
-            #if coeff_crossentropy*eta_test > 0.0001:
-            #    return coeff_crossentropy
-            #else:
-            #    return coeff_all_itr2
 
     #dropout_mode = 'eval' #toss/train/eval
     def do_forward(self, images, dropout_mode):
         net = self.net
-        if self.meta.check_dropout and dropout_mode == 'toss':
+        if self.training_mode and dropout_mode == 'toss':
             training = net.training
             net.train(True)
+            logging.info("##--==Train forward==--")
             logits = net.forward(images)
             net.train(training)
             return logits
