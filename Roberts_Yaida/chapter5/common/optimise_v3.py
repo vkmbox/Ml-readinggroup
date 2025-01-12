@@ -139,7 +139,7 @@ class NetLineStepProcessor:
 
     """
     step_params: check_armiho=True/False (default True); check_additional=True/False (default True);
-    estimation_type=iter-ce/iter-all-norm1/iter-all-norm2/iter-ones-norm1/iter-ones-norm2/analytic-norm2 (default iter-ce)
+    estimation_type=iter-ce/iter-all-norm1/iter-all-norm2/iter-ones-norm1/iter-ones-norm2/analytic-norm2 (default analytic-norm2)
     """
     def step(self, labels, images, momentum, nesterov = False, step_params = None):
         net = self.net
@@ -178,7 +178,8 @@ class NetLineStepProcessor:
                 #if pq_cos >= 0.0:
                 eta_coeff = self.eta_coeff(eta_test, pp, qq0, qq_test, step_params)
                 eta_raw = eta_test*eta_coeff*momentum_coeff
-                logging.info("##Eta raw-value = {} with momentum_coeff = {}".format(eta_raw, momentum_coeff))
+                logging.info("##Eta raw-value = {}: eta_test={}, eta_coeff={}, momentum_coeff = {}"\
+                             .format(eta_raw, eta_test,eta_coeff,momentum_coeff))
                 eta = eta_raw = self.eta_bounded(eta_raw)
                 #else:
                 #    eta = eta_raw = self.eta_cos_negative
@@ -290,8 +291,10 @@ class NetLineStepProcessor:
             delta_pq, delta_qq = pp-qq0, qq_test-qq0
             norm_pq, norm_qq = norm_fro(delta_pq), norm_fro(delta_qq)
             cos_phi1 = self.pq_cos(pp, qq0, qq_test)
-            logging.info("##cos(pp^qq)={}, norm_pq={}, norm_qq={}".format(cos_phi1, norm_pq, norm_qq))
-            return sign(cos_phi1)*math.sqrt(abs(((norm_pq*cos_phi1*self.reducing_coeff)/(norm_qq*eta0 + self.epsilon))))
+            result = sign(cos_phi1)*math.sqrt(abs(((norm_pq*cos_phi1*self.reducing_coeff)/(norm_qq*eta0 + self.epsilon))))
+            logging.info("##cos(pp^qq)={}, norm_pq={}, norm_qq={}, eta0={}, coeff={}, eta_analytic2={}"\
+                         .format(cos_phi1, norm_pq, norm_qq, eta0, result, result*eta0))
+            return result
         
     def eta_coeff_iter(self, eta0, pp, qq0, qq_test, norm_ord, ones):
         with torch.no_grad():
@@ -362,7 +365,7 @@ class NetLineStepProcessor:
         elif eta_type == 'iter-ce':
             return coeff_crossentropy
         else:
-            return coeff_all_itr2
+            return coeff_ayc2
 
     #dropout_mode = 'eval' #toss/train/eval
     def do_forward(self, images, dropout_mode):
