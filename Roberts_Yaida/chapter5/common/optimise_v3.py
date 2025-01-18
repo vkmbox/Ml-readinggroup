@@ -292,6 +292,7 @@ class NetLineStepProcessor:
             norm_pq, norm_qq = norm_fro(delta_pq), norm_fro(delta_qq)
             cos_phi1 = self.pq_cos(pp, qq0, qq_test)
             result = sign(cos_phi1)*math.sqrt(abs(((norm_pq*cos_phi1*self.reducing_coeff)/(norm_qq*eta0 + self.epsilon))))
+            
             logging.info("##cos(pp^qq)={}, norm_pq={}, norm_qq={}, eta0={}, coeff={}, eta_analytic2={}"\
                          .format(cos_phi1, norm_pq, norm_qq, eta0, result, result*eta0))
             return result

@@ -100,10 +100,11 @@ class ParameterProcessor:
             return norm2_squared
 
 class StepResult:
-    def __init__(self, logits, eta, eta_raw, ck_armiho=0.0, ck_wolf=0.0):
+    def __init__(self, logits, eta, eta_raw, eta_ratio, ck_armiho=0.0, ck_wolf=0.0):
         self.logits = logits
         self.eta = eta
         self.eta_raw = eta_raw
+        self.eta_ratio = eta_ratio
         self.ck_armiho = ck_armiho
         self.ck_wolf = ck_wolf
 
@@ -133,8 +134,9 @@ class NetLineStepProcessor:
 
         self.eta_min = 0.0001
         self.eta_max = 1.0
-        self.reducing_coeff = 0.25
-        self.eta0 = 0.000001
+        self.alpha = 0.25
+        self.beta = 0.01
+        self.eta0 = 0.0001
 
     """
     step_params: check_armiho=True/False (default True); check_additional=True/False (default True);
@@ -147,7 +149,7 @@ class NetLineStepProcessor:
         pp = labels_to_softhot(labels, meta)
         self.paramProcessor.save_theta(net)
 
-        diff_initial, momentum_coeff = 0.0, 1.0
+        diff_initial, momentum_coeff, eta_ratio = 0.0, 1.0, 0.0
         for ii in range(2):
             momentum = momentum*momentum_coeff
             if momentum > 0.0 and nesterov == True and self.paramProcessor.is_delta_empty() == False:
@@ -176,12 +178,12 @@ class NetLineStepProcessor:
                     eta_ratio = eta_next/(eta_curr + self.epsilon)
                     logging.info("##--==On iter {} for eta_curr={} eta_next={} with ratio={} ==--"\
                                  .format(iter_num, eta_curr, eta_next, eta_ratio))
+                    iter_num += 1
                     if (iter_num >= self.iter_max) or (0.5 < abs(eta_ratio) and abs(eta_ratio) < 2.0):
                         logging.info("##Finall selected on iter={} eta_raw={} with eta_next={} next/raw ratio={} and momentum_coeff={}"\
                                      .format(iter_num, eta_curr, eta_next, eta_ratio, momentum_coeff))
                         iter_cond = False
                     else:
-                        iter_num += 1
                         eta_curr = eta_next
 
                 eta = self.eta_bounded(eta_curr*momentum_coeff)
@@ -215,7 +217,7 @@ class NetLineStepProcessor:
 
         logging.info("##Eta-value after conditions are applied: {}".format(eta*eta_scale))
         self.paramProcessor.save_delta_current(momentum, eta, eta_scale)
-        return StepResult(logits, eta*eta_scale, eta_curr*momentum_coeff, ck1_armiho, ck1_wolf)
+        return StepResult(logits, eta*eta_scale, eta_curr*momentum_coeff, eta_ratio, ck1_armiho, ck1_wolf)
     
     def get_param(self, step_params, param_name, default):
         if step_params is None:
@@ -270,7 +272,7 @@ class NetLineStepProcessor:
             norm_pq, norm_qq = norm_fro(delta_pq, ord=2), norm_fro(delta_qq, ord=2)
             cos_phi1 = self.pq_cos(delta_pq, delta_qq)
             logging.info("##cos(pp^qq)={}, norm_pq={}, norm_qq={}".format(cos_phi1, norm_pq, norm_qq))
-            eta_next = sign(cos_phi1)*math.sqrt(abs(((norm_pq*cos_phi1*eta_test*self.reducing_coeff)/(norm_qq + self.epsilon)))) #_criteria
+            eta_next = sign(cos_phi1)*math.sqrt(abs(((norm_pq*cos_phi1*eta_test*self.alpha)/(norm_qq + self.beta))))
             logging.info("##Eta-value estimations: analytic={}".format(eta_next))
             return eta_next
 
